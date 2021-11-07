@@ -1,104 +1,86 @@
-import librosa
 import numpy as np
+import soundfile as sf
+import librosa
+import librosa.display
+import os, sys, argparse
 import scipy
+import scipy.io.wavfile
 from scipy import signal
-import argparse
-import sys, os, time
+from scipy.signal import fftconvolve
+import matplotlib.pyplot as plt
 import bss_eval
-from subfunc import pesq2
 
+# MODIFY THE SAMPLE AND FILTER
+sample_mode = 'speech' # speech or music
+filter_mode = 'bandpass' # lowpass, highpass, or bandpass
 
-target_fs = 16000
-def wav_proc(proc_wav, ref_wav, nsy_wav):
-    proc_sig, _ = librosa.load(proc_wav, mono = True, sr = target_fs)
-    ref_sig,  _ = librosa.load(ref_wav,  mono = True, sr = target_fs)
-    nsy_sig,  _ = librosa.load(nsy_wav,  mono = True, sr = target_fs)
+# DO NOT MODIFY PARAMETER!
+fc = [500, 5000]
+fs = 16000
+len_filter = 512
+if filter_mode.lower() == 'lowpass':
+    coeff_b = signal.firwin(len_filter, [1, fc[0]], nyq = fs//2, pass_zero = False)
+elif filter_mode.lower() == 'highpass':
+    coeff_b = signal.firwin(len_filter, [fc[1], fs//2 - 1], nyq = fs//2, pass_zero = False)
+elif filter_mode.lower() == 'bandpass':
+    coeff_b = signal.firwin(len_filter, [fc[0], fc[1]], nyq = fs//2, pass_zero = False)
+else:
+    raise ValueError('Select \'lowpass\', \'highpass\', or \'bandpass\' instead of \'{}\''.format(filter_mode))
 
-    proc_sig_len = len(proc_sig)
-    ref_sig_len  = len(ref_sig)
-    nsy_sig_len  = len(nsy_sig)
+sig, _ = librosa.load(os.path.join(sample_mode, 'source.wav'), mono = True, sr = fs) # source audio file
+dis, _ = librosa.load(os.path.join(sample_mode, 'record.wav'), mono = True, sr = fs) # record audio file
+ref = signal.lfilter(coeff_b, 1, sig)
 
-    min_sig_len = np.min([ref_sig_len, proc_sig_len, nsy_sig_len])
+# DO NOT MODIFY BELOW CODE!
+# Modify recorded audio file
+# Remove silent
+for th in np.array([80, 70, 60, 50, 40, 30]):
+    dis_, on_off = librosa.effects.trim(dis, top_db = th)
+    if (on_off[1] - on_off[0] > len(sig) * 0.65) and (on_off[1] - on_off[0] <= len(sig)):
+        break
+# Synchronize two signal
+corr = fftconvolve(sig, dis_[::-1], mode = 'same')
+delay = 2 * (len(corr)//2 - np.argmax(corr))
+delay = np.max([delay, 0])
+print('{:.2f} second delay in audio file'.format(delay / fs))
+dis_rs = np.zeros(len(ref))
+if len(dis_) + delay > len(ref):
+    dis_rs[delay:delay + len(dis_[:len(ref) - delay])] = dis_[:len(ref) - delay]
+    print('[warning] last {:.2f} second recored signal reducted due to recording environment'.format((len(dis_) - len(dis_[:len(ref) - delay])) / fs))
+else:
+    dis_rs[delay:delay + len(ref)] = dis_[:len(ref)]
     
-    proc_sig = proc_sig[0:min_sig_len]; proc_sig = np.reshape(proc_sig, (1, len(proc_sig)))
-    ref_sig  = ref_sig[0:min_sig_len];  ref_sig = np.reshape(ref_sig, (1, len(ref_sig)))
-    nsy_sig  = nsy_sig[0:min_sig_len];  nsy_sig = np.reshape(nsy_sig, (1, len(nsy_sig)))
-    
-    (sdr, sir, sar, _) = bss_eval.bss_eval_sources(np.concatenate([ref_sig, nsy_sig - ref_sig]), np.concatenate([proc_sig, nsy_sig - proc_sig]), False)
-    pesq = pesq2(ref_wav, proc_wav, sample_rate = 16000, program = '/home/data1/gwl/PESQ')
-    
-    sdr_4 = round(sdr[0], 4); sir_4 = round(sir[0], 4); sar_4 = round(sar[0], 4); pesq_4 = round(float(pesq), 4)
-    result_print = 'SDR({}) SIR({}) SAR({}) PESQ({})'.format(sdr_4, sir_4, sar_4, pesq_4)
-    print(result_print)
-        
-    return sdr[0], sir[0], sar[0], float(pesq)
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--proc_dir', type = str, required = True, help = 'Proccessed wav directory.')
-    parser.add_argument('--ref_dir', type = str, required = True, help = 'Clean wav directory.')
-    parser.add_argument('--nsy_dir', type = str, required = True, help = 'Noisy wav directory.')
-    parser.add_argument('--txt', type = str, required = True, help = 'result text')
-    parser.add_argument('--snr', type = str, required = False, help = 'snr')
-    
-    args = parser.parse_args()
-    
-    sdr_total  = np.empty((1, )); sir_total  = np.empty((1, )); sar_total  = np.empty((1, )); pesq_total = np.empty((1, ))
+fig = plt.figure(dpi = 50, figsize = (15, 18), facecolor = 'white')
+fig.suptitle('{} analysis'.format(filter_mode), fontsize = 32)
+ax = plt.subplot(321)
+ax.set(title = 'Source signal waveform')
+librosa.display.waveshow(sig, sr = fs, max_points = fs//2, x_axis = 'time')
+ax = plt.subplot(322)
+ax.set(title = 'Source signal spectrogram')
+SIG = librosa.amplitude_to_db(np.abs(librosa.stft(sig)), ref = np.max)
+librosa.display.specshow(SIG, y_axis = 'linear', x_axis = 'time', sr = fs)
+ax = plt.subplot(323)
+ax.set(title = 'Reference signal waveform')
+librosa.display.waveshow(ref, sr = fs, max_points = fs//2, x_axis = 'time')
+ax = plt.subplot(324)
+ax.set(title = 'Reference signal spectrogram')
+REF = librosa.amplitude_to_db(np.abs(librosa.stft(ref)), ref = np.max)
+librosa.display.specshow(REF, y_axis = 'linear', x_axis = 'time', sr = fs)
+ax = plt.subplot(325)
+ax.set(title = 'Recorded signal waveform')
+librosa.display.waveshow(dis_rs, sr = fs, max_points = fs//2, x_axis = 'time')
+ax = plt.subplot(326)
+ax.set(title = 'Recorded signal spectrogram')
+DIS = librosa.amplitude_to_db(np.abs(librosa.stft(dis_rs)), ref = np.max)
+librosa.display.specshow(DIS, y_axis = 'linear', x_axis = 'time', sr = fs)
 
-    proc_dir = args.proc_dir
-    ref_dir = args.ref_dir
-    nsy_dir = args.nsy_dir
-    measure_txt = args.txt
-    
-    if args.snr is not None:
-        snr_cond = '_' + args.snr + '_'
-    else:
-        snr_cond = None
-    
-    cnt = 0
-    f_txt = open(measure_txt,'w')
-    
-    for path, dirs, files in os.walk(proc_dir):
-        for file in files:
-            if (os.path.splitext(file)[1].lower() == '.wav') and (file.find(snr_cond) != -1):
-#            if os.path.splitext(file)[1].lower() == '.wav':                    
-                input_wav_path  = path + '/' + file
-                sub_path = path.split(proc_dir)[-1]
-                if sub_path is not None:
-                    ref_wav_path  = ref_dir + '/' + file
-                    nsy_wav_path  = nsy_dir + '/' + file
-                else:
-                    ref_wav_path  = ref_dir + '/' + sub_path + '/' + file
-                    nsy_wav_path  = nsy_dir + '/' + sub_path + '/' + file
-                
-                print('Processing... ' + file, end = '\n')
-                sdr_val, sir_val, sar_val, pesq_val = wav_proc(input_wav_path, ref_wav_path, nsy_wav_path)
-                
-                result_txt = '{}\t{}\t{}\t{}\n'.format(sdr_val, sir_val, sar_val, pesq_val)
-                f_txt.write(result_txt)
-                    
-                sdr_total  = np.append(sdr_total,  sdr_val)
-                sir_total  = np.append(sir_total,  sir_val)
-                sar_total  = np.append(sar_total,  sar_val)
-                pesq_total = np.append(pesq_total, pesq_val)
+# DO NOT MODIFY BELOW CODE
+# Objective measure
+sdr, _, _, _ = bss_eval.bss_eval_sources(np.reshape(ref, (1, -1)), np.reshape(dis_rs, (1, -1)))
+print('Signal-to-distortion ratio(SDR) score is {:.4f}'.format(sdr[0]))
 
-
-    #----final result
-    sdr_mu = round(np.mean(sdr_total[1:]), 4)
-    sdr_std = round(np.std(sdr_total[1:]), 4)
-    sir_mu = round(np.mean(sir_total[1:]), 4)
-    sir_std = round(np.std(sir_total[1:]), 4)
-    sar_mu = round(np.mean(sar_total[1:]), 4)
-    sar_std = round(np.std(sar_total[1:]), 4)
-    pesq_mu = round(np.mean(pesq_total[1:]), 4)
-    pesq_std = round(np.std(pesq_total[1:]), 4)
-
-    result_print = 'SDR({}, {}) SIR({}, {}) SAR({}, {}) PESQ({}, {})'.format(
-           sdr_mu, sdr_std, sir_mu, sir_std, sar_mu, sar_std, pesq_mu, pesq_std)
-    print(result_print)
-
-    result_txt = '{}, {}\n{}, {}\n{}, {}\n{}, {}'.format(
-           sdr_mu, sdr_std, sir_mu, sir_std, sar_mu, sar_std, pesq_mu, pesq_std)
-    
-    f_txt.write(result_txt)
-    f_txt.close()
+# Save figure
+fig.savefig('{}_exp.png'.format(filter_mode), transparent = True)
+ax.clear()
+# Save reference signal
+scipy.io.wavfile.write(os.path.join(sample_mode, '{}_reference.wav'.format(filter_mode)), fs, (np.iinfo(np.int16).max * ref.T).astype(np.int16))
