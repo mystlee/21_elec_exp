@@ -83,7 +83,7 @@ sdr, _, _, _ = bss_eval.bss_eval_sources(np.reshape(ref, (1, -1)), np.reshape(di
 print('Signal-to-distortion ratio(SDR) score is {:.4f}'.format(sdr[0]))
 
 # Save figure
-fig.savefig('{}_exp.png'.format(filter_mode), transparent = True)
+fig.savefig('{}_{}_exp.png'.format(sample_mode, filter_mode), transparent = True)
 ax.clear()
 # Save reference signal
 scipy.io.wavfile.write(os.path.join(sample_mode, '{}_reference.wav'.format(filter_mode)), fs, (np.iinfo(np.int16).max * ref.T).astype(np.int16))
