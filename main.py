@@ -28,7 +28,8 @@ else:
     raise ValueError('Select \'lowpass\', \'highpass\', or \'bandpass\' instead of \'{}\''.format(filter_mode))
     
 sig, _ = librosa.load(os.path.join(sample_mode, 'source.wav'), mono = True, sr = fs) # source audio file
-dis, _ = librosa.load(os.path.join(sample_mode, 'record.wav'), mono = True, sr = fs) # record audio file
+rec_name = 'record_' + filter_mode.lower() + '.wav'
+dis, _ = librosa.load(os.path.join(sample_mode, rec_name), mono = True, sr = fs) # record audio file
 ref = signal.lfilter(coeff_b, 1, sig)
 
 # DO NOT MODIFY BELOW CODE!
