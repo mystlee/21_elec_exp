@@ -8,10 +8,10 @@ import scipy.io.wavfile
 from scipy import signal
 from scipy.signal import fftconvolve
 import matplotlib.pyplot as plt
-import bss_eval
+# import bss_eval
 
 # MODIFY THE SAMPLE AND FILTER
-sample_mode = 'speech' # speech or music
+sample_idx = 1 # 1 ~ 5
 filter_mode = 'Lowpass' # lowpass, highpass, or bandpass
 
 # DO NOT MODIFY PARAMETER!
@@ -27,7 +27,7 @@ elif filter_mode.lower() == 'bandpass':
 else:
     raise ValueError('Select \'lowpass\', \'highpass\', or \'bandpass\' instead of \'{}\''.format(filter_mode))
     
-sig, _ = librosa.load(os.path.join(sample_mode, 'source.wav'), mono = True, sr = fs) # source audio file
+sig, _ = librosa.load(os.path.join(sample_mode, 'mixed_{}.wav'.format(sample_idx)), mono = True, sr = fs) # source audio file
 rec_name = 'record_' + filter_mode.lower() + '.wav'
 dis, _ = librosa.load(os.path.join(sample_mode, rec_name), mono = True, sr = fs) # record audio file
 ref = signal.lfilter(coeff_b, 1, sig)
@@ -80,8 +80,43 @@ librosa.display.specshow(DIS, y_axis = 'linear', x_axis = 'time', sr = fs)
 
 # DO NOT MODIFY BELOW CODE
 # Objective measure
-sdr, _, _, _ = bss_eval.bss_eval_sources(np.reshape(ref, (1, -1)), np.reshape(dis_rs, (1, -1)))
-print('Signal-to-distortion ratio(SDR) score is {:.4f}'.format(sdr[0]))
+def extract_overlapped_windows(x, nperseg, noverlap, window = None):
+    # source: https://github.com/scipy/scipy/blob/v1.2.1/scipy/signal/spectral.py
+    step = nperseg - noverlap
+    shape = x.shape[:-1]+((x.shape[-1]-noverlap)//step, nperseg)
+    strides = x.strides[:-1]+(step*x.strides[-1], x.strides[-1])
+    result = np.lib.stride_tricks.as_strided(x, shape=shape,
+                                             strides=strides)
+    if window is not None:
+        result = window * result
+    return result
+
+def segSISNR(ref, dis ,fs = 16_000, frameLen = 0.1, overlap = 0.5):
+    eps = np.finfo(np.float64).eps
+    win_len = round(frame_len * fs)
+    skip_len = int(np.floor((1. - overlap) * frame_len * fs))
+    MIN_SNR, MAX_SNR= -10, 35 # minimum/maximum SNR in dB
+
+    hannwin = 0.5 * (1. - np.cos(2 * np.pi * np.arange(1, win_len + 1) / (win_len + 1)))
+    ref_frames = extract_overlapped_windows(ref, win_len, win_len - skip_len, hannwin)
+    dis_frames = extract_overlapped_windows(dis, win_len, win_len - skip_len, hannwin)
+    
+    sig_e = np.power(ref_frames, 2).sum(-1)
+    optimal_ratio = np.multiply(ref_frames, dis_frames).sum(-1) / (sig_e + eps)
+    scaled_frames = optimal_ratio * ref_frames
+
+    scaled_sig_e = np.power(scaled_frames, 2).sum(-1)
+    noise_e = np.power(sig_e - dis_frames, 2).sum(-1)
+    
+    segsnr = 10. * np.log10(scaled_sig_e / (noise_e + eps) + eps)    
+    segsnr[segsnr < MIN_SNR] = MIN_SNR
+    segsnr[segmental_snr > MAX_SNR] = MAX_SNR
+    segsnr = segsnr[:-1]
+    return np.mean(segsnr)
+
+# sdr, _, _, _ = bss_eval.bss_eval_sources(np.reshape(ref, (1, -1)), np.reshape(dis_rs, (1, -1)))
+segsisnr = segSISNR(ref, dis)
+print('Segmental scale-invariant signal-to-noise(segSISNR) score is {:.4f}'.format(segsisnr[0]))
 
 # Save figure
 fig.savefig('{}_{}_exp.png'.format(sample_mode, filter_mode), transparent = True)
