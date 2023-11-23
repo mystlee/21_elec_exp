@@ -8,6 +8,9 @@ import scipy.io.wavfile
 from scipy import signal
 from scipy.signal import fftconvolve
 import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings('ignore', category = DeprecationWarning)
+warnings.filterwarnings('ignore', category = FutureWarning)
 
 # MODIFY THE SAMPLE AND FILTER
 sample_idx = 1 # 1 ~ 5
@@ -37,19 +40,27 @@ ref = signal.lfilter(coeff_b, 1, sig)
 
 # DO NOT MODIFY BELOW CODE!
 # Modify recorded audio file and remove silent
+if len(dis) < len(ref):
+    print('[Warn] Not all of the played files were recorded (back parts).')
+    dis = np.pad(dis, (0, len(ref) - len(dis)), 'constant')
+    
 for th in np.array([80, 70, 60, 50, 40, 30]):
     dis_, on_off = librosa.effects.trim(dis, top_db = th)
-    if (on_off[1] - on_off[0] > len(sig) * 0.65) and (on_off[1] - on_off[0] <= len(sig)):
+    if (on_off[1] - on_off[0] > len(sig) * 0.80) and (on_off[1] - on_off[0] <= len(sig)):
         break
 # Synchronize two audio signal
 corr = fftconvolve(sig, dis_[::-1], mode = 'same')
 delay = 2 * (len(corr)//2 - np.argmax(corr))
+if delay < 0:
+    print('[Warn] Not all of the played files were recorded (front parts).')
+    dis_ = np.concatenate((np.zeros(-delay), dis_))
+
 delay = np.max([delay, 0])
-print('{:.2f} second delay in audio file'.format(delay / fs))
+print('[Info]{:.2f} second delay in audio file'.format(delay / fs))
 dis_rs = np.zeros(len(ref))
 if len(dis_) + delay > len(ref):
     dis_rs[delay:delay + len(dis_[:len(ref) - delay])] = dis_[:len(ref) - delay]
-    print('[warning] last {:.2f} second recored signal reducted due to recording environment'.format((len(dis_) - len(dis_[:len(ref) - delay])) / fs))
+    print('[Warn] last {:.2f} second recored signal reducted due to recording environment'.format((len(dis_) - len(dis_[:len(ref) - delay])) / fs))
 else:
     dis_rs[delay:delay + len(ref)] = dis_[:len(ref)]
     
@@ -104,8 +115,8 @@ def freq_segSISNR(ref, dis, fs = 16_000, n_fft = 4096, win_length = 4096, hop_le
     segsnr = segsnr[:-1]
     return np.mean(segsnr), segsnr
 
-segsisnr, _ = freq_segSISNR(ref * 1., dis * 1.)
-print('Segmental scale-invariant signal-to-noise(seg SI-SNR) score is {:.4f}'.format(segsisnr))
+segsisnr, _ = freq_segSISNR(ref * 1., dis_rs * 1.)
+print('[Info]Segmental scale-invariant signal-to-noise(seg SI-SNR) score is {:.4f}'.format(segsisnr))
 
 # Save figure
 if not os.path.exists('exps'):
