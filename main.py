@@ -49,8 +49,17 @@ for th in np.array([80, 70, 60, 50, 40, 30]):
     if (on_off[1] - on_off[0] > len(sig) * 0.80) and (on_off[1] - on_off[0] <= len(sig)):
         break
 # Synchronize two audio signal
-corr = fftconvolve(sig, dis_[::-1], mode = 'same')
-delay = 2 * (len(corr)//2 - np.argmax(corr))
+# corr = fftconvolve(sig, dis_[::-1], mode = 'same')
+# delay = 2 * (len(corr)//2 - np.argmax(corr))
+DELAY_CONTEXT_SIZE = 24_000
+# corr = np.correlate(sig[:DELAY_CONTEXT_SIZE], dis_[:DELAY_CONTEXT_SIZE], mode = 'full')
+sig_rms = librosa.feature.rms(y = ref)
+dis_rms = librosa.feature.rms(y = dis_)
+norm_sig = sig
+norm_dis = dis_ * (np.mean(sig_rms) / np.mean(dis_rms))
+corr = np.correlate(norm_sig[:DELAY_CONTEXT_SIZE], norm_dis[:DELAY_CONTEXT_SIZE], mode = 'full')
+delay = np.argmax(corr) - (len(sig[:DELAY_CONTEXT_SIZE]) - 1)
+
 if delay < 0:
     print('[Warn] Not all of the played files were recorded (front parts).')
     dis_ = np.concatenate((np.zeros(-delay), dis_))
@@ -60,9 +69,9 @@ print('[Info]{:.2f} second delay in audio file'.format(delay / fs))
 dis_rs = np.zeros(len(ref))
 if len(dis_) + delay > len(ref):
     dis_rs[delay:delay + len(dis_[:len(ref) - delay])] = dis_[:len(ref) - delay]
-    print('[Warn] last {:.2f} second recored signal reducted due to recording environment'.format((len(dis_) - len(dis_[:len(ref) - delay])) / fs))
+    print('[Info] last {:.2f} second recored signal reducted'.format((len(dis_) - len(dis_[:len(ref) - delay])) / fs))
 else:
-    dis_rs[delay:delay + len(ref)] = dis_[:len(ref)]
+    dis_rs[delay:delay + len(dis_)] = dis_
     
 fig = plt.figure(dpi = 50, figsize = (15, 18), facecolor = 'white')
 fig.suptitle('{} analysis'.format(filter_mode), fontsize = 32)
