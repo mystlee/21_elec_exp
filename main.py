@@ -124,7 +124,10 @@ def freq_segSISNR(ref, dis, fs = 16_000, n_fft = 4096, win_length = 4096, hop_le
     segsnr = segsnr[:-1]
     return np.mean(segsnr), segsnr
 
-segsisnr, _ = freq_segSISNR(ref * 1., dis_rs * 1.)
+# segsisnr, _ = freq_segSISNR(ref * 1., dis_rs * 1.)
+# frequency weighted
+dis_rs_ = signal.lfilter(coeff_b, 1, dis_rs)
+segsisnr, _ = freq_segSISNR(ref * 1., dis_rs_ * 1.)
 print('[Info]Segmental scale-invariant signal-to-noise(seg SI-SNR) score is {:.4f}'.format(segsisnr))
 
 # Save figure
